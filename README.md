@@ -1,6 +1,6 @@
 # Zoom it!
 
-Fork off the brilliant https://github.com/anitasv/zoom
+Forked off the brilliant https://github.com/anitasv/zoom
 
 Due to a quick turn around, had to implement quickly some extra features;
 
