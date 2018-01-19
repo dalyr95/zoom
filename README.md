@@ -10,6 +10,8 @@ Due to a quick turn around, had to implement quickly some extra features;
 
 This code is not production ready, it works in my case, your mileage may vary.
 
+DEMO https://github.com/dalyr95/zoom
+
 ==============================================
 
 Allows your users to zoom, rotate, and pan images using touch gestures.
