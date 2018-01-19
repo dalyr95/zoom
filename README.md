@@ -4,9 +4,9 @@ Forked off the brilliant https://github.com/anitasv/zoom
 
 Due to a quick turn around, had to implement quickly some extra features;
 
-Min/Max Scale
-Boundary Pan
-Doubleclick zoom in/out
+* Min/Max Scale
+* Boundary Pan
+* Doubleclick zoom in/out
 
 This code is not production ready, it works in my case, your mileage may vary.
 
