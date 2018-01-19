@@ -1,3 +1,5 @@
+(function() {
+
 // Type Vector is [ x, y ]
 // Type Matrix is [ Vector, Vector ]
 // Type Transform is [ Matrix, Vector ]
@@ -99,6 +101,8 @@ function Transform(A, b) {
 Transform.prototype.css = function() {
     var A = this.A;
     var b = this.b;
+
+    // `matrix(elX, elDeg, elDeg, elY, scaleX, scaleY)`
     return 'matrix(' + A[0][0] + ',' + A[0][1] + ',' + A[1][0] + ',' + A[1][1] +
             ',' + b[0] + ',' + b[1] + ')';
 };
@@ -151,7 +155,7 @@ var justscale = function(a, b) {
     var alen = Math.sqrt(dot(a, a));
     var blen = Math.sqrt(dot(b, b));
     var scale = blen / alen;
-    return rotate(scale, 0)
+    return rotate(scale, 0);
 };
 
 /**
@@ -230,7 +234,7 @@ var identity = new Transform([[1, 0], [0, 1]], [0, 0]);
  * @return {Object}
  */
 var defaults = function(param, val) {
-    return (param == undefined) ? val : param;
+    return (param === undefined) ? val : param;
 };
 
 /**
@@ -243,12 +247,13 @@ var defaults = function(param, val) {
  * @return {Object} new config
  */
 var default_config = function(cfg, cfg_def) {
-    var new_cfg = defaults(cfg, {})
-    for (k in cfg_def) {
-        new_cfg[k] = defaults(new_cfg[k], cfg_def[k])
+    var new_cfg = defaults(cfg, {});
+    for (var k in cfg_def) {
+        new_cfg[k] = defaults(new_cfg[k], cfg_def[k]);
     }
     return new_cfg;
 };
+
 
 /**
  * @constructor
@@ -270,8 +275,10 @@ function Zoom(elem, config, wnd) {
     var me = this;
     
     this.config = default_config(config, {
-        "pan" : false,
-        "rotate" : true
+        'pan' : false,
+        'rotate' : true,
+        'minScale': null,
+        'maxScale': null
     });
 
     this.wnd = wnd || window;
@@ -314,6 +321,7 @@ function Zoom(elem, config, wnd) {
     var handleTouchEvent = function(cb) {
         return function(evt) {
             evt.preventDefault();
+
             if (me.isAnimationRunning){
                 return false;
             }            
@@ -327,13 +335,13 @@ function Zoom(elem, config, wnd) {
 
     var handleZoom = handleTouchEvent(function(touches) {
         var numOfFingers = touches.length;
-        if (numOfFingers != me.curTouch){
+        if (numOfFingers !== me.curTouch){
             me.curTouch = numOfFingers;
             me.finalize();
-            if (numOfFingers != 0) {
+            if (numOfFingers !== 0) {
                 setSrcAndDest(touches);
             }
-        } else {
+        } else if (numOfFingers !== 0) {
             setDest(touches);
             me.previewZoom();
         }
@@ -341,27 +349,59 @@ function Zoom(elem, config, wnd) {
     
     var handleTouchStart = handleTouchEvent(function(touches) {
         if (touches.length === 1) {
-            if (me.mayBeDoubleTap != null) {
-                me.wnd.clearTimeout(me.mayBeDoubleTap);
+
+            if (me.mayBeDoubleTap !== null) {
+                clearTimeout(me.mayBeDoubleTap);
                 me.reset();
                 me.mayBeDoubleTap = null;
             } else {
-                me.mayBeDoubleTap = me.wnd.setTimeout(function() {
+                me.mayBeDoubleTap = setTimeout(function() {
                     me.mayBeDoubleTap = null;                    
                 }, 300);
             }
         }
     });
 
+    this.pixelSize = elem.getBoundingClientRect();
+
     elem.parentNode.addEventListener('touchstart', handleTouchStart);
     elem.parentNode.addEventListener('touchstart', handleZoom);
     elem.parentNode.addEventListener('touchmove', handleZoom);
     elem.parentNode.addEventListener('touchend', handleZoom);
+
+    this.destroy = function() {
+        elem.style.removeProperty('transform');
+        elem.style.removeProperty('transform-origin');
+
+        elem.parentNode.removeEventListener('touchstart', handleTouchStart);
+        elem.parentNode.removeEventListener('touchstart', handleZoom);
+        elem.parentNode.removeEventListener('touchmove', handleZoom);
+        elem.parentNode.removeEventListener('touchend', handleZoom);
+
+        /**
+         * Remove elem references so gardbage collector can clean this up
+         */
+        Object.keys(this).forEach(function(key) {
+            delete this[key];
+        }.bind(this));
+    }.bind(this);
 }
 
 Zoom.prototype.previewZoom = function() {
     var additionalZoom = zoom(this.srcCoords, this.destCoords, this.config.rotate);
-    this.resultantZoom = cascade(additionalZoom, this.activeZoom);
+    var resultantZoom = cascade(additionalZoom, this.activeZoom);
+
+    /**
+     * Prevent panning if scaling is greater than min/max
+     */
+    if (this.checkPan(resultantZoom) === false) { return; }
+
+    /**
+     * Prevent panning if reaching the boundary of the image
+     */
+    resultantZoom = this.checkBoundaries(resultantZoom);
+
+    this.resultantZoom = resultantZoom;
     this.repaint();
 };
 
@@ -378,11 +418,43 @@ Zoom.prototype.repaint = function() {
     this.elem.style.transform = this.resultantZoom.css();
 };
 
-Zoom.prototype.reset = function() {
+/**
+ * Toggle zoom-out/zoom-on 
+ * 
+ * @param {Boolean} useOriginalIdentity If triggering reset manually and want to reset scale to 1
+ */
+Zoom.prototype.reset = function(useOriginalIdentity) {
+    var newIdentity = identity;
+
     if (this.wnd.requestAnimationFrame) {
         this.isAnimationRunning = true;
+
         var Z = this.activeZoom;
         var startTime = null;
+
+        /**
+         * Enable doubletap to zoom image
+         */
+        if (this.config.maxScale) {
+            if (!useOriginalIdentity && Z.A[0][0] === 1 && Z.A[1][1] === 1) {
+                var windowSize = {
+                    height: (document.documentElement.clientHeight || window.innerHeight),
+                    width: (document.documentElement.clientWidth || window.innerWidth)
+                };
+
+                var max     = this.config.maxScale;
+
+                var middleX = ((this.pixelSize.width  * this.config.maxScale) - windowSize.width) / 2;
+                    middleX = middleX + (this.elem.offsetLeft);
+                    middleX = middleX * -1;
+
+                var middleY = ((windowSize.height / 2) - (this.pixelSize.height / 2));
+                    middleY = middleY + (((this.pixelSize.height * this.config.maxScale) - windowSize.height) / 2);
+                    middleY = middleY * -1;
+
+                newIdentity = new Transform([[max, 0], [0, max]], [middleX, middleY]);
+            }
+        }
 
         var me = this;
 
@@ -391,22 +463,185 @@ Zoom.prototype.reset = function() {
                 startTime =  time;
             }
             var progress = (time - startTime)/100;
+
             if (progress >= 1) {
-                me.setZoom(identity);
-                me.isAnimationRunning = false;
+                me.setZoom(newIdentity);
+                /**
+                 * Grace period to prevent animation glitches
+                 */
+                setTimeout(function() {
+                    me.isAnimationRunning = false;
+                }, 100);
             } else {
-                me.setZoom(Transform.avg(Z, identity, progress));
+                me.setZoom(Transform.avg(Z, newIdentity, progress));
                 me.wnd.requestAnimationFrame(step);
             }
         };
         this.wnd.requestAnimationFrame(step);
     } else {
-        this.setZoom(identity);
+        this.setZoom(newIdentity);
     }
 };
-Zoom.prototype['reset'] = Zoom.prototype.reset;
-if (typeof exports === "undefined") {
-    window['Zoom'] = Zoom;
-} else {
-    exports['Zoom'] = Zoom;
-}
+
+Zoom.prototype.checkPan = function(resultantZoom) {
+
+   var proceed = true;
+
+    var A = resultantZoom.A;
+
+    /**
+     * If scale is less than `minScale`
+     */
+    var minScale = this.config.minScale;
+    if (minScale) {
+        if (A[0][0] <= minScale && A[1][1] <= minScale) {
+            proceed = false;
+            this.finalize();
+            this.reset(true);
+        }
+    }
+
+    /**
+     * If scale is more than `maxScale`
+     */
+    var maxScale = this.config.maxScale;
+    if (maxScale && (A[0][0] > maxScale && A[1][1] > maxScale)) {
+        proceed = false;
+    }
+
+    return proceed;
+};
+
+
+Zoom.prototype.checkBoundaries = function(resultantZoom) {
+
+    var A = resultantZoom.A;
+    var b = resultantZoom.b;
+
+    var boundaries = this.config.boundaries;
+    if (boundaries === true) {
+        var width = this.pixelSize.width * A[0][0];
+        var height = this.pixelSize.height * A[1][1];
+
+        var windowSize = {
+            height: (document.documentElement.clientHeight || window.innerHeight),
+            width: (document.documentElement.clientWidth || window.innerWidth)
+        };
+
+        var xLeft, xRight;
+        var yTop, yBottom;
+
+        /**
+         * Portrait viewport
+         */
+        if (windowSize.height > windowSize.width) {
+            /**
+             * Prevent image going further right
+             */
+            if (b[0] >= 0) {
+                b[0] = 0;
+            }
+
+            /**
+             * Prevent image going further left
+             */
+            if (Math.abs(b[0]) >= (width - windowSize.width)) {
+                b[0] = (width - windowSize.width) * -1;
+            }
+
+            /**
+             * Prevent image going further up
+             */
+            var yTopFormula = ((windowSize.height - this.pixelSize.height) / 2) * -1;
+
+            if (b[1] <= yTopFormula) {
+                yTop = yTopFormula;
+            }
+
+            /**
+             * Prevent image going further down
+             */
+            var yBottomFormula = ((windowSize.height - this.pixelSize.height) / 2) - (height - this.pixelSize.height);
+
+            if (b[1] > yBottomFormula) {
+                yBottom = yBottomFormula;
+            }
+
+            if (height < windowSize.height) {
+                if (yTop && !yBottom) {
+                    b[1] = yTop;
+                } else if (yBottom && !yTop) {
+                    b[1] = yBottom;
+                }
+            } else {
+                if (yTop && !yBottom) {
+                    b[1] = yBottomFormula;
+                } else if (yBottom && !yTop) {
+                    b[1] = yTopFormula;
+                }
+            }
+        } else {
+            /**
+             * Landscape viewport
+             */
+
+            /**
+             * X Axis
+             */
+
+            /**
+             * Prevent image going further right
+             */
+            var xRightFormula =  this.elem.offsetLeft * -1;
+            if (b[0] >= xRightFormula) {
+                xRight = xRightFormula;
+            }
+
+            /**
+             * Prevent image going further left
+             */
+            var xLeftFormula = ((windowSize.width - this.pixelSize.width) / 2) - (width - this.pixelSize.width);
+            if (b[0] <= xLeftFormula) {
+                xLeft = xLeftFormula;
+            }
+
+
+            /**
+             * Prevent glitching on images whose width is smaller than the viewport
+             */
+            var widerImage = (width > windowSize.width);
+
+            if (xRight && !xLeft) {
+                b[0] = (widerImage) ? xRight : xLeftFormula;
+            } else if (xLeft && !xRight) {
+                b[0] = (widerImage) ? xLeft : xRightFormula;
+            }
+
+
+            /**
+             * Y Axis
+             */
+
+            if (b[1] >= 0) {
+                yTop = 0;
+            } else if (Math.abs(b[1]) >= (height - windowSize.height)) {
+                yBottom = (height - windowSize.height) * -1;
+            }
+
+            if (yTop >= 0 && !yBottom) {
+                b[1] = yTop;
+            } else if (yBottom && !yTop) {
+                b[1] = yBottom;
+            }
+        }
+
+        resultantZoom.A = A;
+        resultantZoom.b = b;
+    }
+
+    return resultantZoom;
+};
+
+window.Zoom = Zoom;
+
+})();

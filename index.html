@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no">
+        <style>
+            img {
+                opacity: 0;
+                transition: opacity 0.2s linear;
+            }
+        </style>
+    </head>
+    <body>
+        <p> Two fingers to zoom and move </p>
+        <p> Double Click to enlarge and reset </p>
+        <div style="width: 640px; height: 320px; max-width: 100%; overflow:hidden;">
+            <img id="img" src="" style="width: 100%;">
+        </div>
+        <p> Single finger is for page scroll.</p>
+
+        <script type="text/javascript" src="zoom.js"> </script>
+        <script type="text/javascript">
+            var zm;
+            var src = 'ny.jpg';
+            var img = document.createElement('IMG');
+
+            img.onload = function(e) {
+                var windowSize = {
+                    height: (document.documentElement.clientHeight || window.innerHeight),
+                    width: (document.documentElement.clientWidth || window.innerWidth)
+                }
+
+                var imageNaturalSize = {
+                    height: e.currentTarget.naturalHeight,
+                    width: e.currentTarget.naturalWidth
+                }
+
+                var maxScale = imageNaturalSize.width / windowSize.width;
+                console.log(maxScale);
+                var $img = document.getElementById('img');
+                $img.src = src;
+                $img.style.opacity = 1;
+
+                zm = new Zoom($img, {
+                    pan: true,
+                    rotate: false,
+                    minScale: 1,
+                    maxScale: maxScale,
+                    boundaries: true
+                });
+            }
+
+            img.src = src;
+        </script>
+    </body>
+</html>
